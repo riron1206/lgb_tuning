@@ -1,0 +1,36 @@
+output_dir: model/v1_tuning/registered
+input_dir: input/bike-sharing-demand
+#input_cv_dir: input/bike-sharing-demand
+orig_submit_csv: input/bike-sharing-demand/sampleSubmission.csv
+target: registered_log
+#split_type: TimeSeriesSplit
+split_type: KFold
+study_name: study
+n_trials: 10
+num_feature:
+  - temp
+  - atemp
+  - humidity
+  - windspeed
+  - count_season
+categorical_feature:
+  - season
+  - holiday
+  - workingday
+  - weather
+  - year
+  - dayofweek
+  - hour
+  - hour_workingday_registered
+  - hour_workingday_registered_semi
+  - hour_workingday_registered_rush
+params_lgb:
+  objective: regression
+  metric: rmse
+  num_round: 100000
+  early_stopping_rounds: 3000
+  boosting_type: gbdt
+  n_jobs: -1
+  random_state: 71
+  verbose_eval: False
+  silent: True

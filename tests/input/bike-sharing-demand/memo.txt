@@ -1,0 +1,3 @@
+# 自分で特徴量追加したkaggleのbike-sharingのデータ
+- preprocess.pyが特徴量追加に使ったモジュール
+- origディレクトリが特徴量追加前の生データ

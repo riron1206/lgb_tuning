@@ -1,0 +1,43 @@
+output_dir: model/v1/casual
+input_dir: input/bike-sharing-demand
+#input_cv_dir: input/bike-sharing-demand
+orig_submit_csv: input/bike-sharing-demand/sampleSubmission.csv
+target: casual_log
+#split_type: TimeSeriesSplit
+split_type: KFold
+num_feature:
+  - temp
+  - atemp
+  - humidity
+  - windspeed
+  - count_season
+categorical_feature:
+  - season
+  - holiday
+  - workingday
+  - weather
+  - year
+  - dayofweek
+  - hour
+  - hour_workingday_casual
+  - hour_workingday_holiday_casual_v1
+  - hour_workingday_holiday_casual_v2
+params_lgb:
+  objective: regression
+  metric: rmse
+  num_round: 100000
+  early_stopping_rounds: 3000
+  boosting_type: gbdt
+  n_jobs: -1
+  random_state: 71
+  verbose_eval: False
+  silent: True
+  bagging_fraction: 0.95
+  bagging_freq: 1
+  feature_fraction: 0.8
+  lambda_l1: 2.45724544435659
+  lambda_l2: 2.93101014669553E-07
+  max_depth: 7
+  min_data_in_leaf: 5
+  num_leaves: 128
+  reg_sqrt: False

@@ -1,0 +1,15 @@
+output_dir: model/v1/casual
+input_dir: input/bike-sharing-demand
+target: casual_log
+n_trials: 30
+is_feature_engineering: False
+params_lgb:
+  objective: regression
+  metric: rmse
+  num_round: 100000
+  early_stopping_rounds: 3000
+  boosting_type: gbdt
+  n_jobs: -1
+  random_state: 71
+  verbose_eval: False
+  silent: True
