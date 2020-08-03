@@ -26,8 +26,12 @@ Usage:
     # InClass用
     $ python preprocess.py -i ../data/orig_InClass/bikesharing-for-education_col_edit -o ../data/add_feature_v7_InClass --is_add_any_cols_v2 --is_add_am_pm_weather_mean --is_add_discomfort_index --is_add_elapsed_day --is_add_target_mean --is_add_registered_casual_mean_count # 列追加v7
 
-    # target_encoding
-    $ python preprocess.py -i ../data/orig_InClass/bikesharing-for-education_col_edit -o ../data/add_feature_v8_InClass -te_split_type TimeSeriesSplit --is_add_any_cols_v2 --is_add_am_pm_weather_mean --is_add_discomfort_index --is_add_elapsed_day --clip_cols humidity --is_add_next_holiday --is_add_season_mid_count --is_add_xfeat_mul_feature
+    # target_encodingやラグとか
+    $ python preprocess.py -i ../data/orig_InClass/bikesharing-for-education_col_edit -o ../data/add_feature_v8_InClass --is_add_lag_cols_any_target -te_split_type TimeSeriesSplit --is_add_any_cols_v2 --is_add_am_pm_weather_mean --is_add_discomfort_index --is_add_elapsed_day --clip_cols humidity --is_add_next_holiday --is_add_season_mid_count --is_add_xfeat_mul_feature
+
+    $ python preprocess.py -i ../data/orig_InClass/bikesharing-for-education_col_edit -o ../data/add_feature_v9_InClass --is_add_lag_cols_any_target -te_split_type TimeSeriesSplit --is_add_any_cols_v2 --is_add_am_pm_weather_mean --is_add_discomfort_index --is_add_elapsed_day --clip_cols humidity --is_add_next_holiday --is_add_season_mid_count --is_add_xfeat_mul_feature
+
+    $ python preprocess.py -i ../data/orig_InClass/bikesharing-for-education_col_edit -o ../data/tmp -te_split_type other --add_target_shift_v2 -1 --is_add_any_cols_v2
 
 """
 import argparse
@@ -41,6 +45,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm import tqdm
 
 sys.path.append(r"C:\Users\yokoi.shingo\GitHub\xfeat")
 from xfeat import (
@@ -244,6 +249,138 @@ def add_target_shift(df_train, df_test, n_row=24 * 12, target_col="count"):
         df_test = (
             df_test.drop(c, axis=1) if c in df_test.columns else df_test
         )  # test setで余分な列削除
+
+    return df_train, df_test
+
+
+def add_target_shift_v2(df_train, df_test, n_row=24 * 12, target_col="count"):
+    """
+    ラグ特徴量追加
+    - (n_row/24)日前の目的変数列を追加
+      add_target_shift()とほぼ同じ
+      違いは追加する列名変えるようにしているだけ
+    """
+    df = (
+        pd.concat([df_train, df_test], ignore_index=True)
+        .sort_values(by=["datetime"])
+        .reset_index(drop=True)
+    )
+
+    shift_targets = []
+    for i, x in enumerate(df["datetime"]):
+        shift_datetime = x - datetime.timedelta(days=(n_row // 24))
+        _df = df[df["datetime"] == shift_datetime]
+        shift_target = _df[target_col]
+
+        if len(shift_target) == 0:
+            shift_target = None
+        else:
+            # print(i, shift_datetime)
+            # display(_df)
+            # print(shift_target)
+            shift_target = shift_target.values[0]
+
+        shift_targets.append(shift_target)
+
+    # print(shift_targets)
+    df[target_col + "_" + str(n_row // 24) + "_day_shift"] = shift_targets
+
+    df_train = df[df[target_col].notnull()].reset_index(drop=True)
+
+    df_test = df[df[target_col].isnull()].reset_index(drop=True)
+    for c in ["casual", "registered", "count"]:
+        df_test = (
+            df_test.drop(c, axis=1) if c in df_test.columns else df_test
+        )  # test setで余分な列削除
+
+    return df_train, df_test
+
+
+def add_lag_cols_any_target(
+    df_train,
+    df_test,
+    n_lag_week=26,
+    g_col=["dayofweek", "hour"],
+    target_cols=["casual", "registered", "count"],
+):
+    """
+    ラグ特徴量追加
+    - 過去の同曜日かつ同時刻の目的変数列を追加する
+    - 過去の同曜日かつ同時刻の目的変数の平均列を追加する
+    """
+
+    def _shift_mean(row, n_col=4):
+        """n_col個前までの平均列を作成する"""
+        row = row.dropna()
+        # print(row)
+        s_m = None
+        if row.empty is False:
+            if row.shape[0] > n_col:
+                # print(row)
+                s_tail = row.to_list()[:n_col]
+                # print(s_tail)
+                s_m = np.mean(s_tail)
+                # print(s_m)
+        return s_m
+
+    # 目的変数対数化（例外的に大きい時を緩和するため）
+    for col in target_cols:
+        df_train["%s_log" % col] = np.log(df_train[col] + 1)
+    target_cols = [c + "_log" for c in target_cols]
+
+    # train test 連結
+    df_train["set"] = "train"
+    df_test["set"] = "test"
+    df = (
+        pd.concat([df_train, df_test], ignore_index=True)
+        .sort_values(by=["datetime"])
+        .reset_index(drop=True)
+    )
+
+    # 年、月、時間、曜日の列追加
+    df["year"] = df["datetime"].dt.year.astype(int)
+    df["month"] = df["datetime"].dt.month.astype(int)
+    df["day"] = df["datetime"].dt.day.astype(int)
+    df["dayofweek"] = df["datetime"].dt.dayofweek.astype(int)
+    df["hour"] = df["datetime"].dt.hour.astype(int)
+
+    str_g_col = "-".join(g_col)
+    df_g_all = None
+    # 曜日、時刻でグループ化
+    for (i, df_g) in tqdm(df.groupby(g_col)):
+        # test setは2012/7-12の6か月.余分に4*6+2=26週前までラグをとる
+        for t in range(1, 1 + n_lag_week):
+            # shiftほしい列だけにする
+            df_g_shift = df_g.shift(t)[target_cols]
+            # 列名変更
+            for col in target_cols:
+                s_col = f"{col}_{str_g_col}_shift_{t}"
+                df_g_shift = df_g_shift.rename(columns={col: s_col})
+            # shift列追加
+            df_g = pd.concat([df_g, df_g_shift], axis=1)
+        df_g_all = pd.concat([df_g_all, df_g])
+    df_g_all = df_g_all.sort_values(by="datetime")
+
+    # 各ラグ列名をまとめる
+    t_s_cols = []
+    for t_c in target_cols:
+        t_s_cols.append([c for c in df_g_all.columns.to_list() if t_c + "_" in c])
+    # print(t_s_cols)
+
+    # 各ラグ列の種類ごとに平均列作成
+    for cols in t_s_cols:
+        c = (
+            cols[0].split("_")[0]
+            + "_"
+            + cols[0].split("_")[1]
+            + "_"
+            + "shift_tail_mean"
+        )
+        df_g_all[c] = df_g_all[cols].apply(lambda row: _shift_mean(row), axis=1)
+
+    df_train = df_g_all[df_g_all["set"] == "train"]
+    df_test = df_g_all[df_g_all["set"] == "test"]
+    # print(df_train.shape, df_test.shape)
 
     return df_train, df_test
 
@@ -818,18 +955,37 @@ def add_any_cols(train, test):
     return train, test
 
 
-def add_season_mid_count(train, test):
+def add_season_mid_count(train, test, targets=["casual", "registered", "count"]):
     """四季ごとのcount数の中央値列や各カテゴリごとでのcount数の中央値列追加"""
-    by_season = train.groupby("season")[["count"]].median()
-    by_season.columns = ["count_season_mid"]
-    train = train.join(by_season, on="season")
-    test = test.join(by_season, on="season")
 
+    for col in targets:
+        by_season = train.groupby("season")[[col]].median()
+        by_season.columns = [f"{col}_season_mid"]
+        train = train.join(by_season, on="season")
+        test = test.join(by_season, on="season")
+
+    for col in targets:
+        # 目的変数対数化
+        train[f"{col}_log"] = np.log(train[col] + 1)
+        # 対数化してから集計することで例外的に多い場合を緩和する
+        by_season = train.groupby("season")[[f"{col}_log"]].median()
+        by_season.columns = [f"{col}_log_season_mid"]
+        train = train.join(by_season, on="season")
+        test = test.join(by_season, on="season")
+
+    # 各カテゴリごとでのcount数の中央値列
     cat_cols = ["season", "holiday", "workingday", "weather"]
-    by_ = train.groupby(cat_cols)[["count"]].median()
-    by_.columns = ["count_cat_cols_mid"]
-    train = train.join(by_, on=cat_cols)
-    test = test.join(by_, on=cat_cols)
+    for col in targets:
+        by_ = train.groupby(cat_cols)[[col]].median()
+        by_.columns = [f"{col}_cat_cols_mid"]
+        train = train.join(by_, on=cat_cols)
+        test = test.join(by_, on=cat_cols)
+
+    for col in targets:
+        by_ = train.groupby(cat_cols)[[f"{col}_log"]].median()
+        by_.columns = [f"{col}_log_cat_cols_mid"]
+        train = train.join(by_, on=cat_cols)
+        test = test.join(by_, on=cat_cols)
 
     return train, test
 
@@ -962,7 +1118,7 @@ def target_encoding(
         data_tmp = pd.DataFrame({c: train_x[c], target: train_y})
         target_mean = data_tmp.groupby(c)[target].mean()
         # テストデータのカテゴリを置換
-        test_x[c + "_te"] = test_x[c].map(target_mean)
+        test_x[c + "_" + target + "_te"] = test_x[c].map(target_mean)
 
         # 学習データの変換後の値を格納する配列を準備
         tmp = np.repeat(np.nan, train_x.shape[0])
@@ -976,7 +1132,7 @@ def target_encoding(
             tmp[idx_2] = train_x[c].iloc[idx_2].map(target_mean)
 
         # 変換後のデータで元の変数を置換
-        train_x[c + "_te"] = tmp
+        train_x[c + "_" + target + "_te"] = tmp
 
     return train_x, test_x
 
@@ -986,7 +1142,7 @@ def cv_target_encoding(
     train_y: pd.Series,
     test_x: pd.DataFrame,
     cat_cols: list,
-    target: str,
+    targets: str,
     split_type="KFold",
     n_splits=4,
     random_state=71,
@@ -1010,9 +1166,9 @@ def cv_target_encoding(
         df[enc_cols] = df[enc_cols].apply(lambda x: LabelEncoder().fit_transform(x.astype(str)))
         #display(df)
 
-        target = "survived"
-        cat_cols.remove(target)
-        (X_train, X_test, y_train, y_test) = train_test_split(df.drop(target, axis=1), df[target], test_size=0.3, random_state=71)
+        target = ["survived"]
+        cat_cols.remove(target[0])
+        (X_train, X_test, y_train, y_test) = train_test_split(df.drop(target[0], axis=1), df[target[0]], test_size=0.3, random_state=71)
         #display(X_train)
         tr_dfs, va_dfs = preprocess.cv_target_encoding(X_train, y_train, X_test, cat_cols, target, split_type="StratifiedKFold")
         for tr_df, va_df in zip(tr_dfs, va_dfs):
@@ -1027,24 +1183,71 @@ def cv_target_encoding(
         sms = StratifiedKFold(
             n_splits=n_splits, shuffle=True, random_state=random_state
         )
+        gen = sms.split(train_x, train_y)
     elif split_type == "TimeSeriesSplit":
         # 時系列クロスバリデーション
         # データは必ず時間の昇順に並べておく必要がある！！！
         # TimeSeriesSplit はtrain を先頭から順番にデータ切っていき、後ろのレコードをvalidation するだけなので！！！
         sms = TimeSeriesSplit(n_splits=n_splits)
-    else:
+        gen = sms.split(train_x, train_y)
+    elif split_type == "KFold":
         # K-分割交差検証
         sms = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        gen = sms.split(train_x, train_y)
+    else:
+        # index指定する場合
+        tr_idxs = [None, None, None, None]
+        tr_idxs[0] = df_train[
+            (df_train["datetime"] >= "2011-01-01")
+            & (df_train["datetime"] < "2011-07-01")
+        ].index.to_list()
+        tr_idxs[1] = df_train[
+            (df_train["datetime"] >= "2011-03-01")
+            & (df_train["datetime"] < "2011-09-01")
+        ].index.to_list()
+        tr_idxs[2] = df_train[
+            (df_train["datetime"] >= "2011-05-01")
+            & (df_train["datetime"] < "2011-11-01")
+        ].index.to_list()
+        tr_idxs[3] = df_train[
+            (df_train["datetime"] >= "2011-07-01")
+            & (df_train["datetime"] < "2012-01-01")
+        ].index.to_list()
+
+        va_idxs = [None, None, None, None]
+        va_idxs[0] = df_train[
+            (df_train["datetime"] >= "2011-07-01")
+            & (df_train["datetime"] < "2012-01-01")
+        ].index.to_list()
+        va_idxs[1] = df_train[
+            (df_train["datetime"] >= "2011-09-01")
+            & (df_train["datetime"] < "2012-03-01")
+        ].index.to_list()
+        va_idxs[2] = df_train[
+            (df_train["datetime"] >= "2011-11-01")
+            & (df_train["datetime"] < "2012-05-01")
+        ].index.to_list()
+        va_idxs[3] = df_train[
+            (df_train["datetime"] >= "2012-01-01")
+            & (df_train["datetime"] < "2012-07-01")
+        ].index.to_list()
+
+        def my_generator():
+            for tr_idx, va_idx in zip(tr_idxs, va_idxs):
+                yield tr_idx, va_idx
+
+        gen = my_generator()
 
     tr_dfs, va_dfs = [], []
-    for i, (tr_idx, va_idx) in enumerate(sms.split(train_x, train_y)):
+    for i, (tr_idx, va_idx) in enumerate(gen):
 
         # 学習データからバリデーションデータを分ける
         tr_x, va_x = train_x.iloc[tr_idx].copy(), train_x.iloc[va_idx].copy()
         tr_y, va_y = train_y.iloc[tr_idx], train_y.iloc[va_idx]
 
-        # target encoding
-        tr_x, va_x = target_encoding(tr_x, tr_y, va_x, cat_cols, target)
+        for target in targets:
+            # target encoding
+            tr_x, va_x = target_encoding(tr_x, tr_y, va_x, cat_cols, target)
         tr_dfs.append(pd.concat([tr_x, tr_y], axis=1))
         va_dfs.append(pd.concat([va_x, va_y], axis=1))
 
@@ -1164,6 +1367,20 @@ def get_args():
         const=True,
         default=False,
         help="12日前の目的変数列を追加",
+    )
+    ap.add_argument(
+        "-add_t_s",
+        "--add_target_shift_v2",
+        type=int,
+        default=(24 * 30 * 6) + (24 * 4),
+        help="n日前の目的変数列を追加. デフォルトは6か月と4日前からのラグをとるようにしている",
+    )
+    ap.add_argument(
+        "--is_add_lag_cols_any_target",
+        action="store_const",
+        const=True,
+        default=False,
+        help="過去の同曜日かつ同時刻の目的変数列を追加",
     )
     ap.add_argument(
         "--is_add_logs",
@@ -1437,9 +1654,18 @@ if __name__ == "__main__":
         print("--- 12日前の目的変数列を追加 ---")
         df_train, df_test = add_target_shift(df_train, df_test, n_row=24 * 12)
 
-    if args["is_add_target_shift"]:
-        print("--- 12日前の目的変数列を追加 ---")
-        df_train, df_test = add_target_shift(df_train, df_test, n_row=24 * 12)
+    if args["is_add_lag_cols_any_target"]:
+        print("--- 過去の同曜日かつ同時刻の目的変数列を追加 ---")
+        df_train, df_test = add_lag_cols_any_target(df_train, df_test)
+
+    if args["add_target_shift_v2"] > 0:
+        print("--- n日前の目的変数列を追加 ---")
+        for col in tqdm(["casual_log", "registered_log", "count_log"]):
+            for i in range(20):
+                n_row = args["add_target_shift_v2"] + (24 * i)
+                df_train, df_test = add_target_shift_v2(
+                    df_train, df_test, n_row=n_row, target_col=col
+                )
 
     if args["is_add_next_holiday"]:
         print("--- 次の日holidayかどうかの列を追加する ---")
@@ -1500,32 +1726,34 @@ if __name__ == "__main__":
             df["dayofweek"] = df["datetime"].dt.dayofweek.astype(str)
             df["hour"] = df["datetime"].dt.hour.astype(str)
 
-        target = "count"
-        cat_cols = [
-            "season",
-            "holiday",
-            "workingday",
-            "weather",
-            "year",
-            "month",
-            "day",
-            "dayofweek",
-            "hour",
-        ]
-
+        # target = "count"
+        targets = ["casual_log", "registered_log", "count_log"]
         train_x = df_train.copy()
-        train_x = train_x.drop([target], axis=1)
-        train_y = df_train[target]
         test_x = df_test.copy()
-        # target_encoding
-        train_x, test_x = target_encoding(train_x, train_y, test_x, cat_cols, target)
-        _df_train = pd.concat([train_x, train_y], axis=1)
-        _df_test = test_x
+        for target in targets:
+            cat_cols = [
+                "season",
+                "holiday",
+                "workingday",
+                "weather",
+                "year",
+                "month",
+                "day",
+                "dayofweek",
+                "hour",
+            ]
+            train_x = train_x.drop([target], axis=1)
+            train_y = df_train[target]
+            # target_encoding
+            train_x, test_x = target_encoding(
+                train_x, train_y, test_x, cat_cols, target
+            )
+            train_x = pd.concat([train_x, train_y], axis=1)
         # csv出力
-        _df_train = _df_train.sort_values(by=["datetime"])
-        _df_test = _df_test.sort_values(by=["datetime"])
-        _df_train.to_csv(os.path.join(args["output_dir"], "train.csv"), index=False)
-        _df_test.to_csv(os.path.join(args["output_dir"], "test.csv"), index=False)
+        train_x = train_x.sort_values(by=["datetime"])
+        test_x = test_x.sort_values(by=["datetime"])
+        train_x.to_csv(os.path.join(args["output_dir"], "train.csv"), index=False)
+        test_x.to_csv(os.path.join(args["output_dir"], "test.csv"), index=False)
 
         train_x = df_train.copy()
         train_x = train_x.drop([target], axis=1)
@@ -1537,7 +1765,7 @@ if __name__ == "__main__":
             train_y,
             test_x,
             cat_cols,
-            target,
+            targets,
             split_type=args["cv_target_encoding_split_type"],
         )
         # csv出力

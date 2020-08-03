@@ -166,6 +166,8 @@ def get_data():
         help="feature_engineering 実行するか",
     )
     args = vars(ap.parse_args())
+    args["del_features"] = None
+
     with open(args["config"]) as f:
         config = yaml.load(f)
     args.update(config)
@@ -180,17 +182,10 @@ def get_data():
     df_train = pd.read_csv(os.path.join(args["input_dir"], "train.csv"))
     if args["features"] is None:
         cols = df_train.columns.to_list()
-        for del_col in [
-            "datetime",
-            "casual_log",
-            "registered_log",
-            "count_log",
-            "casual",
-            "registered",
-            "count",
-        ]:
-            if del_col in cols:
-                cols.remove(del_col)
+        if args["del_features"] is not None:
+            for del_col in args["del_features"]:
+                if del_col in cols:
+                    cols.remove(del_col)
         args["features"] = cols
     X_train = df_train[args["features"]]
     y_train = df_train[args["target"]]

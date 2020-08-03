@@ -2,6 +2,13 @@ output_dir: model/v1/registered
 input_dir: input/bike-sharing-demand
 target: registered_log
 n_trials: 30
+del_features:
+  - datetime
+  - casual_log
+  - count_log
+  - casual
+  - registered
+  - count
 is_feature_engineering: False
 params_lgb:
   objective: regression
