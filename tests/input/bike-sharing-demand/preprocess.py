@@ -1202,15 +1202,15 @@ def cv_target_encoding(
             & (df_train["datetime"] < "2011-07-01")
         ].index.to_list()
         tr_idxs[1] = df_train[
-            (df_train["datetime"] >= "2011-03-01")
+            (df_train["datetime"] >= "2011-01-01")
             & (df_train["datetime"] < "2011-09-01")
         ].index.to_list()
         tr_idxs[2] = df_train[
-            (df_train["datetime"] >= "2011-05-01")
+            (df_train["datetime"] >= "2011-01-01")
             & (df_train["datetime"] < "2011-11-01")
         ].index.to_list()
         tr_idxs[3] = df_train[
-            (df_train["datetime"] >= "2011-07-01")
+            (df_train["datetime"] >= "2011-01-01")
             & (df_train["datetime"] < "2012-01-01")
         ].index.to_list()
 

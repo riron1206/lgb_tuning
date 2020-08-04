@@ -186,7 +186,7 @@ class Submission:
 
 class Xfeat:
     @classmethod
-    def label_encode_xfeat(df):
+    def label_encode_xfeat(cls, df):
         """
         xfeatでobject型の列すべてラベルエンコディング
         """
